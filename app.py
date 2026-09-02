@@ -12,20 +12,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. 初始化記憶資料庫 (session_state)
+# 2. 初始化自訂持倉的記憶資料庫 (session_state)
 if "my_positions" not in st.session_state:
-    st.session_state.my_positions = [] # 持倉清單
-    
-# 全球期貨商品初始全集
-ALL_FUTURE_MAP = {
-    "台指期近月 (WTX=F)": "WTX=F",
-    "微型小道瓊近月 (MYM=F)": "MYM=F",
-    "黃金期貨近月 (GC=F)": "GC=F",
-    "輕原油期貨近月 (CL=F)": "CL=F"
-}
-
-if "watchlist" not in st.session_state:
-    st.session_state.watchlist = list(ALL_FUTURE_MAP.keys()) # 預設觀察重點名單包含所有商品
+    st.session_state.my_positions = [] # 用來存放多筆持倉資料的清單
 
 # 介面語系與排版優化 (Tailwind 風格 CSS)
 st.markdown("""
@@ -50,10 +39,17 @@ if st.sidebar.button("🔄 手動即時重新整理"):
     st.cache_data.clear()
     st.rerun()
 
-st.markdown('<div class="big-title">🎯 期貨智慧量化下單與自選商品追蹤系統</div>', unsafe_allow_html=True)
+st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="sub-title">數據每 10 秒自動跳動更新 | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# 3. 量化分析核心
+# 3. 定義要追蹤的期貨商品代號
+FUTURE_MAP = {
+    "台指期近月 (WTX=F)": "WTX=F",
+    "微型小道瓊近月 (MYM=F)": "MYM=F",
+    "黃金期貨近月 (GC=F)": "GC=F",
+    "輕原油期貨近月 (CL=F)": "CL=F"
+}
+
 @st.cache_data(ttl=10) # 10秒短快取
 def fetch_and_analyze(ticker_name, ticker_symbol):
     try:
@@ -118,7 +114,6 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
             "symbol": ticker_symbol,
             "price": round(float(today['Close']), 2),
             "abs_score": abs(score),
-            "score_raw": score,
             "direction": direction,
             "color": color_code,
             "stop_loss": round(stop_loss_val, 2),
@@ -128,17 +123,18 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
     except Exception as e:
         return None
 
-# 預先撈取市場全部行情數據
+# 預先抓取行情
 all_data = {}
-for name, symbol in ALL_FUTURE_MAP.items():
+for name, symbol in FUTURE_MAP.items():
     res = fetch_and_analyze(name, symbol)
     if res: all_data[name] = res
 
-# ==================== 📥 側邊欄：持倉設定與觀察名單管理 ====================
-st.sidebar.markdown("### 📥 持倉設定面板")
-add_name = st.sidebar.selectbox("欲追蹤期貨商品", list(ALL_FUTURE_MAP.keys()))
+# ==================== 📥 側邊欄：動態新增持倉面板 ====================
+st.sidebar.markdown("### 📥 新增持倉部位")
+add_name = st.sidebar.selectbox("欲追蹤期貨商品", list(FUTURE_MAP.keys()))
 add_type = st.sidebar.radio("交易方向", ["做多 (Buy)", "做空 (Sell)"])
 
+# 動態抓取預設建議數值
 current_ref_price = all_data[add_name]["price"] if add_name in all_data else 0.0
 sys_ref_sl = all_data[add_name]["stop_loss"] if add_name in all_data else 0.0
 
@@ -146,44 +142,38 @@ add_price = st.sidebar.number_input("您的買進/賣出價格", value=float(cur
 add_sl = st.sidebar.number_input("您的防守止損點", value=float(sys_ref_sl), step=1.0)
 add_tp = st.sidebar.number_input("您的獲利止盈點 (0代表不設)", value=0.0, step=1.0)
 
-if st.sidebar.button("➕ 新增至即時持倉面板", use_container_width=True):
+# 【➕ 新增按鈕邏輯】
+if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True):
     new_pos = {
-        "id": str(time.time()),
+        "id": str(time.time()), # 給予不重複的ID以便精準刪除
         "name": add_name,
         "type": add_type,
         "entry_price": add_price,
         "stop_loss": add_sl,
         "take_profit": add_tp
     }
+    st.sidebar.success(f"成功新增：{add_name}")
     st.session_state.my_positions.append(new_pos)
-    st.sidebar.success(f"成功新增持倉：{add_name}")
     st.rerun()
-
-# 側邊欄：重新加回已被刪除的觀察商品
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🔍 自選重點觀察名單管理")
-removed_items = [item for item in ALL_FUTURE_MAP.keys() if item not in st.session_state.watchlist]
-if removed_items:
-    re_add_target = st.sidebar.selectbox("將商品重新加回觀察榜單", removed_items)
-    if st.sidebar.button("➕ 重新加入觀察名單", use_container_width=True):
-        st.session_state.watchlist.append(re_add_target)
-        st.rerun()
-else:
-    st.sidebar.info("💡 所有商品皆在觀察重點名單中")
-
 
 # ==================== 📊 輸出：多筆持倉獨立小方格看板 ====================
 if st.session_state.my_positions:
     st.markdown("### 🎛️ 我的即時監控持倉群組 (Active Portfolio)")
+    
+    # 建立多欄位排版，讓小方格可以漂亮地並排與向下延伸
     cols = st.columns(3) 
+    
+    # 迴圈讀取所有儲存的持倉，進行動態渲染
     for idx, pos in enumerate(list(st.session_state.my_positions)):
         if pos["name"] not in all_data: continue
+        
         market = all_data[pos["name"]]
         now_p = market["price"]
         ent_p = pos["entry_price"]
         sl_p = pos["stop_loss"]
         tp_p = pos["take_profit"]
         
+        # 計算損益
         if "做多" in pos["type"]:
             pnl = now_p - ent_p
             hit_sl = now_p <= sl_p
@@ -199,11 +189,19 @@ if st.session_state.my_positions:
         box_class = "profit" if pnl >= 0 else "loss"
         status_msg = "✅ 持倉訊號健全"
         
-        if hit_sl: box_class, status_msg = "alert", "🚨 出場通知：已穿透止損！"
-        elif hit_tp: box_class, status_msg = "alert", "🎯 出場通知：已達止盈目標！"
-        elif tech_exit: box_class, status_msg = "alert", "⚠️ 出場通知：技術指標反轉！"
+        if hit_sl:
+            box_class = "alert"
+            status_msg = "🚨 出場通知：已穿透止損！"
+        elif hit_tp:
+            box_class = "alert"
+            status_msg = "🎯 出場通知：已達止盈目標！"
+        elif tech_exit:
+            box_class = "alert"
+            status_msg = "⚠️ 出場通知：技術指標反轉！"
             
+        # 決定擺放的位置 (透過餘數分配到 3 個 Column 內)
         with cols[idx % 3]:
+            # 使用獨立小方格樣式呈現
             st.markdown(f"""
             <div class="portfolio-card {box_class}">
                 <div style="font-size: 1.15rem; font-weight: bold; color: #111827;">{pos["name"]}</div>
@@ -220,23 +218,31 @@ if st.session_state.my_positions:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            if st.button(f"❌ 刪除此筆持倉追蹤", key=f"del_{pos['id']}", use_container_width=True):
+            
+            # 【❌ 刪除按鈕邏輯】
+            # 使用不重複的唯一 key，確保刪除時精準對應
+            if st.button(f"❌ 刪除此筆追蹤 ({pos['name'][:3]})", key=f"del_{pos['id']}", use_container_width=True):
                 st.session_state.my_positions.remove(pos)
                 st.rerun()
+                
     st.markdown("---")
 
+# 6. 原有每日最佳下單訊號前端呈現
+st.markdown("### 📊 今日全商品推薦觀察榜單")
+results = sorted(list(all_data.values()), key=lambda x: x["abs_score"], reverse=True)[:3]
 
-# ==================== 📊 輸出：自選觀察重點名單 (正確修復排版) ====================
-st.markdown("### 📋 今日自選重點觀察名單")
-
-# 從全量資料中過濾出留在 Watchlist 中的商品，並依據技術指標強烈程度排序
-watchlist_data = [all_data[name] for name in st.session_state.watchlist if name in all_data]
-watchlist_sorted = sorted(watchlist_data, key=lambda x: x["abs_score"], reverse=True)
-
-if not watchlist_sorted:
-    st.info("💡 目前您的觀察名單為空。您可以從左側側邊欄的「自選重點觀察名單管理」將商品重新加回！")
+if not results:
+    st.info("💡 暫時無法獲取數據，請稍後再試。")
 else:
-    for i, item in enumerate(watchlist_sorted):
+    for i, item in enumerate(results):
         color = item["color"]
+        st.markdown(f"""
+        <div class="card" style="border-left-color: {color};">
+            <span style="font-size:1.2rem; font-weight:bold; color:#1F2937;">Top {i+1} 推薦觀察：{item["name"]}</span><br>
+            <span style="font-size:1.4rem; font-weight:bold; color:{color};">{item["direction"]}</span> | 
+            當前價格: <b>{item["price"]}</b> | 
+            系統建議止損參考: <b style="color:#DC2626;">{item["stop_loss"]}</b>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # 修正點：使用完美的比例分割 (85% 卡片, 15% 按鈕)
+        df_plot = item["df"].tail(40)
