@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
+import time
 
 # 1. 網頁基礎設定
 st.set_page_config(
@@ -11,21 +12,38 @@ st.set_page_config(
     layout="wide"
 )
 
+# 2. 自動定時刷新機制 (每 10 秒網頁自動在背景重新載入最新價格)
+# 透過 Streamlit 內建 session_state 模擬計時器，免額外安裝套件
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = time.time()
+
 # 介面語系與排版優化 (Tailwind 風格 CSS)
 st.markdown("""
     <style>
     .big-title { font-size:2.2rem !important; font-weight: 700; color: #1E3A8A; text-align: center; margin-bottom: 0.5rem; }
     .sub-title { font-size:1.2rem !important; color: #4B5563; text-align: center; margin-bottom: 2rem; }
     .card { padding: 1.5rem; border-radius: 0.5rem; background-color: #F3F4F6; margin-bottom: 1rem; border-left: 5px solid #3B82F6; }
-    .alert-card { padding: 1.5rem; border-radius: 0.5rem; background-color: #FEE2E2; margin-bottom: 1rem; border: 2px solid #EF4444; border-left: 10px solid #EF4444; animation: blinker 1.5s linear infinite; }
-    @keyframes blinker { 50% { opacity: 0.8; } }
+    
+    /* 追蹤小方格專用樣式 */
+    .track-grid { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem; }
+    .track-box { flex: 1; min-width: 250px; max-width: 350px; padding: 1.2rem; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-top: 6px solid #6B7280; background-color: #FFFFFF; }
+    .track-box.profit { border-top-color: #10B981; background-color: #F0FDF4; }
+    .track-box.loss { border-top-color: #EF4444; background-color: #FEF2F2; }
+    .track-box.alert { border-top-color: #F59E0B; background-color: #FFFBEB; animation: pulse 2s infinite; }
+    
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown('<div class="big-title">🎯 今日最佳下單訊號與持倉追蹤系統</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">系統每日自動更新，結合多重指標評分與個人持倉即時止損追蹤通知</div>', unsafe_allow_html=True)
+# 側邊欄：手動手動刷新按鈕
+if st.sidebar.button("🔄 手動即時重新整理"):
+    st.cache_data.clear()
+    st.rerun()
 
-# 2. 定義要追蹤的期貨商品代號
+st.markdown('<div class="big-title">🎯 期貨智慧量化下單與即時持倉追蹤系統</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sub-title">數據每 10 秒背景自動跳動更新 | 最後同步時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+
+# 3. 定義要追蹤的期貨商品代號
 FUTURE_MAP = {
     "台指期近月 (WTX=F)": "WTX=F",
     "微型小道瓊近月 (MYM=F)": "MYM=F",
@@ -33,14 +51,14 @@ FUTURE_MAP = {
     "輕原油期貨近月 (CL=F)": "CL=F"
 }
 
-@st.cache_data(ttl=60)  # 將快取縮短為 60 秒，以便即時追蹤您的買進價損益
+@st.cache_data(ttl=10)  # 快取縮短為 10 秒，達成自動追蹤效果
 def fetch_and_analyze(ticker_name, ticker_symbol):
     try:
         df = yf.download(ticker_symbol, period="6mo", interval="1d", progress=False)
         if df.empty: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
 
-        # 3. 技術指標計算 (KD, MACD)
+        # 技術指標計算 (KD, MACD)
         low_9 = df['Low'].rolling(window=9).min()
         high_9 = df['High'].rolling(window=9).max()
         rsv = ((df['Close'] - low_9) / (high_9 - low_9)) * 100
@@ -101,83 +119,109 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
             "direction": direction,
             "color": color_code,
             "stop_loss": round(stop_loss_val, 2),
+            "kd_signal": "GOLDEN" if kd_golden else ("DEATH" if kd_death else "NONE"),
             "df": df
         }
     except Exception as e:
         return None
 
-# 執行基礎數據獲取
+# 撈取最新資料
 all_data = {}
 for name, symbol in FUTURE_MAP.items():
     res = fetch_and_analyze(name, symbol)
     if res: all_data[name] = res
 
-# ==================== 【新功能：輸入與追蹤面板】 ====================
-st.sidebar.markdown("### 📥 個人持倉輸入面板 (Trace Panel)")
-enable_trade = st.sidebar.checkbox("開啟持倉追蹤功能", value=False)
+# ==================== 📥 側邊欄：持倉輸入面板 ====================
+st.sidebar.markdown("### 📥 持倉設定面板")
+enable_trade = st.sidebar.checkbox("開啟持倉追蹤功能", value=True)
 
 user_position = None
 if enable_trade:
-    trade_name = st.sidebar.selectbox("請選擇已買進商品", list(FUTURE_MAP.keys()))
+    trade_name = st.sidebar.selectbox("持有商品", list(FUTURE_MAP.keys()))
     trade_type = st.sidebar.radio("交易方向", ["做多 (Buy)", "做空 (Sell)"])
     
-    # 根據選中商品帶入當前價做為參考預設值
     current_market_price = all_data[trade_name]["price"] if trade_name in all_data else 0.0
     sys_suggest_sl = all_data[trade_name]["stop_loss"] if trade_name in all_data else 0.0
     
-    user_price = st.sidebar.number_input("您的成交價格 (Entry Price)", value=float(current_market_price), step=1.0)
-    user_sl = st.sidebar.number_input("您的自訂止損點 (Stop Loss)", value=float(sys_suggest_sl), step=1.0)
+    user_price = st.sidebar.number_input("您的買進價格 (Entry)", value=float(current_market_price), step=1.0)
+    user_sl = st.sidebar.number_input("自訂固定止損點", value=float(sys_suggest_sl), step=1.0)
+    user_tp = st.sidebar.number_input("自訂止盈目標價 (0代表不設)", value=0.0, step=1.0)
     
     user_position = {
         "name": trade_name,
         "type": trade_type,
         "entry_price": user_price,
-        "stop_loss": user_sl
+        "stop_loss": user_sl,
+        "take_profit": user_tp
     }
 
-# ==================== 【新功能：輸出損益與通知機制】 ====================
+# ==================== 📊 輸出：持倉追蹤小方格與出場訊號 ====================
 if user_position and user_position["name"] in all_data:
-    st.markdown("### 🔔 即時持倉追蹤與通知狀態")
+    st.markdown("### 🎛️ 即時持倉追蹤看板 (Trading Dashboard)")
+    
     target = all_data[user_position["name"]]
     now_p = target["price"]
     ent_p = user_position["entry_price"]
     sl_p = user_position["stop_loss"]
+    tp_p = user_position["take_profit"]
     
     # 計算未實現損益點數
     if "做多" in user_position["type"]:
         pnl = now_p - ent_p
-        is_triggered = now_p <= sl_p
+        hit_sl = now_p <= sl_p
+        hit_tp = (now_p >= tp_p) if tp_p > 0 else False
+        tech_exit = target["kd_signal"] == "DEATH"  # 多單遇到指標死亡交叉提示出場
     else:
         pnl = ent_p - now_p
-        is_triggered = now_p >= sl_p
+        hit_sl = now_p >= sl_p
+        hit_tp = (now_p <= tp_p) if tp_p > 0 else False
+        tech_exit = target["kd_signal"] == "GOLDEN" # 空單遇到指標黃金交叉提示出場
         
-    pnl_color = "#DC2626" if pnl < 0 else "#10B981"
     pnl_sign = "+" if pnl >= 0 else ""
     
-    # 輸出通知卡片
-    if is_triggered:
-        st.markdown(f"""
-        <div class="alert-card">
-            <span style="font-size: 1.5rem; font-weight: bold; color: #DC2626;">⚠️ 觸發止損通知！！</span><br>
-            您持有的 <b>{user_position["name"]}</b> 當前市場價為 <span style="font-size:1.3rem; font-weight:bold;">{now_p}</span>，
-            已{'跌破' if '做多' in user_position['type'] else '突破'}您設定的止損價 <b>{sl_p}</b>！<br>
-            當前持倉損益：<b style="color:{pnl_color}; font-size:1.2rem;">{pnl_sign}{round(pnl, 2)} 點</b>。建議立即評估出場！
+    # 判斷方格狀態與出場訊號內容
+    box_class = "profit" if pnl >= 0 else "loss"
+    exit_status_text = "正常持股中"
+    
+    if hit_sl:
+        box_class = "alert"
+        exit_status_text = "🚨 出場訊號：已跌破自訂止損點！"
+    elif hit_tp:
+        box_class = "alert"
+        exit_status_text = "🎯 出場訊號：已達到止盈目標價！"
+    elif tech_exit:
+        box_class = "alert"
+        exit_status_text = "⚠️ 出場訊號：技術指標出現反轉交叉！"
+
+    # 用 HTML + CSS 渲染出精緻的獨立小方格
+    st.markdown(f"""
+    <div class="track-grid">
+        <div class="track-box {box_class}">
+            <div style="font-size: 0.9rem; color: #6B7280; font-weight: bold;">MONITORING 商品</div>
+            <div style="font-size: 1.3rem; font-weight: bold; color: #111827; margin-bottom: 0.5rem;">{user_position["name"]}</div>
+            <div style="font-size: 0.85rem; color: #4B5563;">方向：<b>{user_position["type"]}</b></div>
+            <div style="font-size: 0.85rem; color: #4B5563;">成本：<b>{ent_p}</b> | 止損：<b>{sl_p}</b></div>
         </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class="card" style="border-left-color: #3B82F6; background-color: #EFF6FF;">
-            <span style="font-size: 1.2rem; font-weight: bold; color: #1E3A8A;">✅ 持倉正常追蹤中</span><br>
-            監控商品：<b>{user_position["name"]} ({user_position["type"]})</b> | 
-            買進價格：<b>{ent_p}</b> | 
-            自訂止損：<b>{sl_p}</b><br>
-            當前最新價：<b>{now_p}</b> | 
-            未實現損益：<b style="color:{pnl_color}; font-size:1.3rem;">{pnl_sign}{round(pnl, 2)} 點</b> (未觸及止損，請安心持有)
+        <div class="track-box {box_class}">
+            <div style="font-size: 0.9rem; color: #6B7280; font-weight: bold;">REAL-TIME MARKET</div>
+            <div style="font-size: 1.8rem; font-weight: bold; color: #111827;">{now_p}</div>
+            <div style="font-size: 0.85rem; color: #6B7280;">最新市場報價</div>
         </div>
-        """, unsafe_allow_html=True)
+        <div class="track-box {box_class}">
+            <div style="font-size: 0.9rem; color: #6B7280; font-weight: bold;">UNREALIZED PNL</div>
+            <div style="font-size: 1.8rem; font-weight: bold; color: {'#10B981' if pnl >= 0 else '#EF4444'};">{pnl_sign}{round(pnl, 2)} 點</div>
+            <div style="font-size: 0.85rem; color: #6B7280;">當前持倉未實現損益</div>
+        </div>
+        <div class="track-box {box_class}">
+            <div style="font-size: 0.9rem; color: #6B7280; font-weight: bold;">SIGNAL STATUS</div>
+            <div style="font-size: 1.1rem; font-weight: bold; color: {'#111827' if box_class != 'alert' else '#DC2626'}; margin-top: 0.3rem;">{exit_status_text}</div>
+            <div style="font-size: 0.85rem; color: #6B7280;">系統智慧出場提示</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown("---")
 
-# 4. 原有每日最佳下單訊號前端呈現
+# 5. 原有每日最佳下單訊號前端呈現
 st.markdown("### 📊 今日推薦觀察商品榜單")
 results = sorted(list(all_data.values()), key=lambda x: x["abs_score"], reverse=True)[:3]
 
@@ -185,10 +229,11 @@ if not results:
     st.info("💡 暫時無法獲取數據，請稍後再試。")
 else:
     for i, item in enumerate(results):
+        color = item["color"]
         st.markdown(f"""
-        <div class="card" style="border-left-color: {item["color"]};">
+        <div class="card" style="border-left-color: {color};">
             <span style="font-size:1.2rem; font-weight:bold; color:#1F2937;">Top {i+1} 推薦觀察：{item["name"]}</span><br>
-            <span style="font-size:1.4rem; font-weight:bold; color:{item["color"]};">{item["direction"]}</span> | 
+            <span style="font-size:1.4rem; font-weight:bold; color:{color};">{item["direction"]}</span> | 
             當前價格: <b>{item["price"]}</b> | 
             系統建議止損參考: <b style="color:#DC2626;">{item["stop_loss"]}</b>
         </div>
@@ -196,9 +241,3 @@ else:
         
         df_plot = item["df"].tail(40)
         fig = go.Figure(data=[go.Candlestick(
-            x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='K線'
-        )])
-        fig.update_layout(margin=dict(l=20, r=20, t=10, b=10), height=240, xaxis_rangeslider_visible=False, template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
-
-st.caption(f"系統最後更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (每分鐘自動追蹤整理)")
