@@ -39,22 +39,23 @@ if st.sidebar.button("🔄 手動即時重新整理"):
     st.rerun()
 
 st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="sub-title">數據每 30 秒自動跳動更新（抗封鎖安全機制） | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sub-title">數據每 10 秒自動跳動更新 | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# 3. 【優化重組：全面改採最不易被封鎖的 Yahoo Finance 標準連續期貨合約代碼】
+# 3. 全球熱門期貨名單（包含 12 月冬令天然氣、日指、韓指大軍）
 FUTURE_MAP = {
     "台指期近月 (WTX=F)": "WTX=F",
     "微型小道瓊 (MYM=F)": "MYM=F",
     "微型那斯達克 (MNQ=F)": "MNQ=F",
     "微型標普500 (MES=F)": "MES=F",
-    "日經期貨近月 (NK=F)": "NK=F",
-    "黃金期貨近月 (GC=F)": "GC=F",
-    "白銀期貨近月 (SI=F)": "SI=F",
-    "輕原油期貨近月 (CL=F)": "CL=F",
-    "天然氣期貨近月 (NG=F)": "NG=F"
+    "日經225指數 (NK225)": "^N225",
+    "韓國綜合200 (KOSPI)": "^KS200",
+    "黃金期貨 (GC=F)": "GC=F",
+    "白銀期貨 (SI=F)": "SI=F",
+    "輕原油期貨 (CL=F)": "CL=F",
+    "12月小天然氣期貨 (NGZ26)": "NGZ26.NYM"  # 精準鎖定12月合約代碼
 }
 
-@st.cache_data(ttl=30) # 緩衝拉長至 30 秒，徹底解除 429 請求過多警報
+@st.cache_data(ttl=10) # 10秒短快取
 def fetch_and_analyze(ticker_name, ticker_symbol):
     try:
         df = yf.download(ticker_symbol, period="6mo", interval="1d", progress=False)
@@ -123,7 +124,6 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
             "direction": direction,
             "color": color_code,
             "stop_loss": round(stop_loss_val, 2),
-            "kd_signal": "GOLDEN" if kd_golden else ("DEATH" if kd_death else "NONE"),
             "df": df
         }
     except Exception as e:
@@ -135,7 +135,7 @@ for name, symbol in FUTURE_MAP.items():
     res = fetch_and_analyze(name, symbol)
     if res: all_data[name] = res
 
-# ==================== 📥 側邊欄：持倉輸入面板功能 ====================
+# ==================== 📥 側邊欄：持倉輸入面板功能 (升級保證金與口數) ====================
 st.sidebar.markdown("### 📥 持倉設定面板")
 trade_name = st.sidebar.selectbox("持有商品", list(FUTURE_MAP.keys()))
 trade_type = st.sidebar.radio("交易方向", ["做多 (Buy)", "做空 (Sell)"])
@@ -173,7 +173,7 @@ if st.session_state.my_positions:
         ent_p = pos["entry_price"]
         sl_p = pos["stop_loss"]
         margin_p = pos["margin"]
-        lots_p = pos.get("lots", 2)
+        lots_p = pos.get("lots", 2) # 預設2口
         
         # 計算點數損益
         if "做多" in pos["type"]:
@@ -183,10 +183,12 @@ if st.session_state.my_positions:
             pnl_points = ent_p - now_p
             hit_sl = now_p >= sl_p
             
-        # 針對天然氣連續合約進行美金精算
+        # 【核心公式：針對天然氣期貨進行美元與保證金淨值精算】
+        # 小天然氣合約1口跳動0.005點 = 12.5美元 ➡️ 即 1點 = 2500美元
         if "天然氣" in pos["name"]:
             usd_pnl = pnl_points * 2500 * lots_p
         else:
+            # 其他商品預設點數損益，天然氣專門美金精算
             usd_pnl = pnl_points * 50 * lots_p 
             
         total_initial_margin = margin_p * lots_p
