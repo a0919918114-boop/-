@@ -41,7 +41,7 @@ if st.sidebar.button("🔄 手動即時重新整理"):
 st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="sub-title">數據每 10 秒自動跳動更新 | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# 3. 【全新擴充：加回日指與韓指之十強大軍名單】
+# 3. 全球熱門期貨名單（包含 12 月冬令天然氣、日指、韓指大軍）
 FUTURE_MAP = {
     "台指期近月 (WTX=F)": "WTX=F",
     "微型小道瓊 (MYM=F)": "MYM=F",
@@ -52,7 +52,7 @@ FUTURE_MAP = {
     "黃金期貨 (GC=F)": "GC=F",
     "白銀期貨 (SI=F)": "SI=F",
     "輕原油期貨 (CL=F)": "CL=F",
-    "天然氣期貨 (NG=F)": "NG=F"
+    "12月小天然氣期貨 (NGZ26)": "NGZ26.NYM"  # 精準鎖定12月合約代碼
 }
 
 @st.cache_data(ttl=10) # 10秒短快取
@@ -124,8 +124,6 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
             "direction": direction,
             "color": color_code,
             "stop_loss": round(stop_loss_val, 2),
-            "lock_in_profit": round(float(df['Close'].iloc[-2]), 2), # 新增基準參考價防止報錯
-            "kd_signal": "GOLDEN" if kd_golden else ("DEATH" if kd_death else "NONE"),
             "df": df
         }
     except Exception as e:
@@ -137,32 +135,34 @@ for name, symbol in FUTURE_MAP.items():
     res = fetch_and_analyze(name, symbol)
     if res: all_data[name] = res
 
-# ==================== 📥 側邊欄：持倉輸入面板功能 ====================
+# ==================== 📥 側邊欄：持倉輸入面板功能 (升級保證金與口數) ====================
 st.sidebar.markdown("### 📥 持倉設定面板")
 trade_name = st.sidebar.selectbox("持有商品", list(FUTURE_MAP.keys()))
 trade_type = st.sidebar.radio("交易方向", ["做多 (Buy)", "做空 (Sell)"])
+trade_lots = st.sidebar.number_input("持有口數 (Lots)", value=2, min_value=1, step=1)
 
 current_market_price = all_data[trade_name]["price"] if trade_name in all_data else 0.0
 sys_suggest_sl = all_data[trade_name]["stop_loss"] if trade_name in all_data else 0.0
 
-user_price = st.sidebar.number_input("您的買進價格 (Entry)", value=float(current_market_price), step=1.0)
-user_sl = st.sidebar.number_input("自訂固定止損點", value=float(sys_suggest_sl), step=1.0)
-user_tp = st.sidebar.number_input("自訂止盈目標價 (0代表不設)", value=0.0, step=1.0)
+user_price = st.sidebar.number_input("您的買進/賣出價格 (Entry)", value=float(current_market_price), step=0.01)
+user_sl = st.sidebar.number_input("自訂固定止損點", value=float(sys_suggest_sl), step=0.01)
+user_margin = st.sidebar.number_input("單口初始保證金 (USD)", value=996.0, step=10.0)
 
 if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True):
     new_pos = {
         "id": str(time.time()), 
         "name": trade_name,
         "type": trade_type,
+        "lots": trade_lots,
         "entry_price": user_price,
         "stop_loss": user_sl,
-        "take_profit": user_tp
+        "margin": user_margin
     }
     st.session_state.my_positions.append(new_pos)
-    st.sidebar.success(f"成功新增：{trade_name}")
+    st.sidebar.success(f"成功將 {trade_lots}口 {trade_name} 納入核心監控！")
     st.rerun()
 
-# ==================== 📊 輸出：持倉追蹤區塊 ====================
+# ==================== 📊 輸出：持倉追蹤與美金保證金精算區塊 ====================
 if st.session_state.my_positions:
     st.markdown("### 🎛️ 我的即時監控持倉群組 (Active Portfolio)")
     for pos in list(st.session_state.my_positions):
@@ -172,38 +172,50 @@ if st.session_state.my_positions:
         now_p = target["price"]
         ent_p = pos["entry_price"]
         sl_p = pos["stop_loss"]
-        tp_p = pos["take_profit"]
+        margin_p = pos["margin"]
+        lots_p = pos.get("lots", 2) # 預設2口
         
+        # 計算點數損益
         if "做多" in pos["type"]:
-            pnl = now_p - ent_p
+            pnl_points = now_p - ent_p
             hit_sl = now_p <= sl_p
-            hit_tp = (now_p >= tp_p) if tp_p > 0 else False
-            tech_exit = target["kd_signal"] == "DEATH"
         else:
-            pnl = ent_p - now_p
+            pnl_points = ent_p - now_p
             hit_sl = now_p >= sl_p
-            hit_tp = (now_p <= tp_p) if tp_p > 0 else False
-            tech_exit = target["kd_signal"] == "GOLDEN"
             
-        pnl_sign = "+" if pnl >= 0 else ""
-        box_class = "profit" if pnl >= 0 else "loss"
+        # 【核心公式：針對天然氣期貨進行美元與保證金淨值精算】
+        # 小天然氣合約1口跳動0.005點 = 12.5美元 ➡️ 即 1點 = 2500美元
+        if "天然氣" in pos["name"]:
+            usd_pnl = pnl_points * 2500 * lots_p
+        else:
+            # 其他商品預設點數損益，天然氣專門美金精算
+            usd_pnl = pnl_points * 50 * lots_p 
+            
+        total_initial_margin = margin_p * lots_p
+        current_equity = total_initial_margin + usd_pnl
+        margin_growth = (usd_pnl / total_initial_margin) * 100
+        
+        pnl_sign = "+" if pnl_points >= 0 else ""
+        usd_sign = "+" if usd_pnl >= 0 else ""
+        box_class = "profit" if pnl_points >= 0 else "loss"
         exit_status_text = "✅ 持倉狀態：健全持股中"
         
-        if hit_sl: box_class, exit_status_text = "alert", "🚨 出場訊號通知：價格已穿透您的自訂止損點！"
-        elif hit_tp: box_class, exit_status_text = "alert", "🎯 出場訊號通知：價格已達到您的預設止盈點！"
-        elif tech_exit: box_class, exit_status_text = "alert", "⚠️ 出場訊號通知：技術指標出現反轉交叉（KD指標反向交叉）！"
+        if hit_sl: box_class, exit_status_text = "alert", "🚨 出場訊號通知：價格已跌破或突破您的防守止損點！"
 
         st.markdown(f"""
         <div class="portfolio-card {box_class}">
-            <div style="font-size: 1.3rem; font-weight: bold; color: #111827;">📈 持倉商品：{pos["name"]} （{pos["type"]}）</div>
+            <div style="font-size: 1.3rem; font-weight: bold; color: #111827;">📈 持倉商品：{pos["name"]} ── 共計 {lots_p} 口 （{pos["type"]}）</div>
             <div style="margin-top: 0.5rem; font-size: 1rem; color: #374151;">
-                建倉成本：<b>{ent_p}</b> | 防守止損：<b>{sl_p}</b> {'| 止盈目標：<b>'+str(tp_p)+'</b>' if tp_p > 0 else ''}
+                建倉成本：<b>{ent_p}</b> | 防守止損線：<b>{sl_p}</b> | 總投入原始保證金：<b style="color:#1E3A8A;">${total_initial_margin} USD</b>
             </div>
-            <div style="margin-top: 0.5rem; font-size: 1.2rem; color: #111827;">
-                當前市場報價：<span style="font-weight:bold;">{now_p}</span>
+            <div style="margin-top: 0.5rem; font-size: 1.15rem; color: #111827;">
+                當前市場即時報價：<span style="font-weight:bold; color:#1E3A8A;">{now_p}</span>
             </div>
-            <div style="font-size: 1.5rem; font-weight: bold; color: {'#10B981' if pnl >= 0 else '#EF4444'}; margin: 0.5rem 0;">
-                未實現損益點數：{pnl_sign}{round(pnl, 2)} 點
+            <div style="font-size: 1.4rem; font-weight: bold; color: {'#10B981' if pnl_points >= 0 else '#EF4444'}; margin: 0.3rem 0;">
+                未實現損益點數：{pnl_sign}{round(pnl_points, 4)} 點 | 📊 預估帳面損益：{usd_sign}${round(usd_pnl, 2)} 美元
+            </div>
+            <div style="font-size: 1.1rem; font-weight: bold; color: #374151;">
+                💰 當前部位總淨值：${round(current_equity, 2)} USD | 槓桿盈虧比：<span style="color:{'#10B981' if margin_growth>=0 else '#EF4444'}">{pnl_sign}{round(margin_growth, 2)}%</span>
             </div>
             <hr style="border:0; border-top:1px solid #E5E7EB; margin: 0.5rem 0;">
             <div style="font-size: 1.15rem; font-weight: bold; color: {'#111827' if box_class != 'alert' else '#DC2626'};">
@@ -227,13 +239,3 @@ else:
         st.markdown(f"""
         <div class="card" style="border-left-color: {item["color"]};">
             <span style="font-size:1.2rem; font-weight:bold; color:#1F2937;">觀察商品：{item["name"]}</span><br>
-            <span style="font-size:1.4rem; font-weight:bold; color:{item["color"]};">{item["direction"]}</span> | 
-            當前價格: <b>{item["price"]}</b> | 
-            系統建議止損參考: <b style="color:#DC2626;">{item["stop_loss"]}</b>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        df_plot = item["df"].tail(40)
-        fig = go.Figure(data=[go.Candlestick(
-            x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='K線'
-        )])
