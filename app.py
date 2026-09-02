@@ -1,7 +1,6 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import plotly.graph_objects as go
 from datetime import datetime
 
@@ -44,15 +43,32 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # 3. 訊號演算法（核心邏輯）
-        # 計算 KD (STOCH)
-        kd = ta.stoch(df['High'], df['Low'], df['Close'], k=9, d=3)
-        df['K'] = kd['STOCHk_9_3_3']
-        df['D'] = kd['STOCHd_9_3_3']
+        # 3. 純原生數學公式計算技術指標 (不依賴外部套件)
+        # --- 計算 KD 指標 (9, 3, 3) ---
+        low_9 = df['Low'].rolling(window=9).min()
+        high_9 = df['High'].rolling(window=9).max()
+        rsv = ((df['Close'] - low_9) / (high_9 - low_9)) * 100
         
-        # 計算 MACD
-        macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        df['MACD_hist'] = macd['MACDh_12_26_9']
+        k_list, d_list = [], []
+        current_k, current_d = 50.0, 50.0 # 初始值
+        for r in rsv:
+            if pd.isna(r):
+                k_list.append(None)
+                d_list.append(None)
+            else:
+                current_k = (2/3) * current_k + (1/3) * r
+                current_d = (2/3) * current_d + (1/3) * current_k
+                k_list.append(current_k)
+                d_list.append(current_d)
+        df['K'] = k_list
+        df['D'] = d_list
+        
+        # --- 計算 MACD 指標 (12, 26, 9) ---
+        ema12 = df['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = df['Close'].ewm(span=26, adjust=False).mean()
+        df['DIF'] = ema12 - ema26
+        df['MACD_signal'] = df['DIF'].ewm(span=9, adjust=False).mean()
+        df['MACD_hist'] = df['DIF'] - df['MACD_signal']
         
         # 取得最新兩日數據做判斷
         today = df.iloc[-1]
