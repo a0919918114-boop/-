@@ -22,10 +22,9 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.markdown('<div class="big-title">🎯 今日最佳下單訊號商品</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">系統每日自動更新，依據多重技術指標綜合評分篩選之最佳 signal(訊號)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">系統每日自動更新，依據多重技術指標綜合評分篩選之最佳訊號</div>', unsafe_allow_html=True)
 
 # 2. 定義要追蹤的期貨商品代號 (Ticker)
-# 由於 yfinance 取得連續期貨數據以 =F 結尾
 FUTURE_MAP = {
     "台指期近月 (WTX=F)": "WTX=F",
     "微型小道瓊近月 (MYM=F)": "MYM=F",
@@ -33,7 +32,7 @@ FUTURE_MAP = {
     "輕原油期貨近月 (CL=F)": "CL=F"
 }
 
-@st.cache_data(ttl=3600)  # cache(快取) 1 小時，避免頻繁發送 request(請求) 導致 API 被封鎖
+@st.cache_data(ttl=3600)  # 快取 1 小時，避免頻繁發送請求
 def fetch_and_analyze(ticker_name, ticker_symbol):
     try:
         # 獲取日 K 線數據
@@ -41,7 +40,7 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
         if df.empty:
             return None
         
-        # 移除多重索引（yfinance 有時會產生）
+        # 移除多重索引
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -61,7 +60,7 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
         
         score = 0
         direction = "觀望"
-        stop_loss(停損點) = 0.0
+        stop_loss_val = 0.0
         
         # 策略 A: 價格突破前日高低點
         break_up = today['Close'] > yesterday['High']
@@ -71,11 +70,11 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
         kd_golden = (yesterday['K'] < yesterday['D']) and (today['K'] > today['D'])
         kd_death = (yesterday['K'] > yesterday['D']) and (today['K'] < today['D'])
         
-        # 策略 C: MACD 柱狀圖轉折 (輔助動能)
+        # 策略 C: MACD 柱狀圖轉折
         macd_up = today['MACD_hist'] > yesterday['MACD_hist']
         macd_down = today['MACD_hist'] < yesterday['MACD_hist']
         
-        # 綜合評分評估 (Score system)
+        # 綜合評分評估
         if break_up: score += 2
         if kd_golden: score += 3
         if macd_up and today['MACD_hist'] > 0: score += 1
@@ -87,10 +86,10 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
         # 決定方向與停損
         if score >= 3:
             direction = "多 (Long)"
-            stop_loss(停損點) = float(df['Low'].iloc[-5:].min()) # 以5日最低點當停損
+            stop_loss_val = float(df['Low'].iloc[-5:].min()) # 以5日最低點當停損
         elif score <= -3:
             direction = "空 (Short)"
-            stop_loss(停損點) = float(df['High'].iloc[-5:].max()) # 以5日最高點當停損
+            stop_loss_val = float(df['High'].iloc[-5:].max()) # 以5日最高點當停損
             
         return {
             "name": ticker_name,
@@ -98,7 +97,7 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
             "price": round(float(today['Close']), 2),
             "score": abs(score),
             "direction": direction,
-            "stop_loss": round(stop_loss(停損點), 2),
+            "stop_loss": round(stop_loss_val, 2),
             "df": df
         }
     except Exception as e:
@@ -126,11 +125,11 @@ else:
             <span style="font-size:1.1rem; font-weight:bold; color:#1F2937;">Top {i+1} : {item["name"]}</span><br>
             <span style="font-size:1.5rem; font-weight:bold; color:{color};">{item["direction"]} 訊號</span> | 
             現在價格: <b>{item["price"]}</b> | 
-            建議 stop_loss(停損點): <b style="color:#DC2626;">{item["stop_loss"]}</b>
+            建議停損點 (Stop Loss): <b style="color:#DC2626;">{item["stop_loss"]}</b>
         </div>
         """, unsafe_allow_html=True)
         
-        # 使用 Plotly 繪製 Chart(圖表)，達到 RWD 手機縮放效果
+        # 使用 Plotly 繪製 Chart
         df_plot = item["df"].tail(40) # 顯示最近40根 K 線
         fig = go.Figure(data=[go.Candlestick(
             x=df_plot.index,
@@ -149,4 +148,4 @@ else:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-st.caption(f"系統最後更新時間 (Data_updated): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (每小時自動重新整理)")
+st.caption(f"系統最後更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (每小時自動重新整理)")
