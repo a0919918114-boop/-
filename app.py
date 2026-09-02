@@ -12,8 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. 自動定時刷新機制 (每 10 秒網頁自動在背景重新載入最新價格)
-# 透過 Streamlit 內建 session_state 模擬計時器，免額外安裝套件
+# 2. 自動定時刷新機制
 if "last_refresh" not in st.session_state:
     st.session_state.last_refresh = time.time()
 
@@ -35,7 +34,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 側邊欄：手動手動刷新按鈕
+# 側邊欄：手動刷新按鈕
 if st.sidebar.button("🔄 手動即時重新整理"):
     st.cache_data.clear()
     st.rerun()
@@ -51,7 +50,7 @@ FUTURE_MAP = {
     "輕原油期貨近月 (CL=F)": "CL=F"
 }
 
-@st.cache_data(ttl=10)  # 快取縮短為 10 秒，達成自動追蹤效果
+@st.cache_data(ttl=10)  # 快取縮短為 10 秒
 def fetch_and_analyze(ticker_name, ticker_symbol):
     try:
         df = yf.download(ticker_symbol, period="6mo", interval="1d", progress=False)
@@ -170,16 +169,15 @@ if user_position and user_position["name"] in all_data:
         pnl = now_p - ent_p
         hit_sl = now_p <= sl_p
         hit_tp = (now_p >= tp_p) if tp_p > 0 else False
-        tech_exit = target["kd_signal"] == "DEATH"  # 多單遇到指標死亡交叉提示出場
+        tech_exit = target["kd_signal"] == "DEATH"
     else:
         pnl = ent_p - now_p
         hit_sl = now_p >= sl_p
         hit_tp = (now_p <= tp_p) if tp_p > 0 else False
-        tech_exit = target["kd_signal"] == "GOLDEN" # 空單遇到指標黃金交叉提示出場
+        tech_exit = target["kd_signal"] == "GOLDEN"
         
     pnl_sign = "+" if pnl >= 0 else ""
     
-    # 判斷方格狀態與出場訊號內容
     box_class = "profit" if pnl >= 0 else "loss"
     exit_status_text = "正常持股中"
     
@@ -193,7 +191,6 @@ if user_position and user_position["name"] in all_data:
         box_class = "alert"
         exit_status_text = "⚠️ 出場訊號：技術指標出現反轉交叉！"
 
-    # 用 HTML + CSS 渲染出精緻的獨立小方格
     st.markdown(f"""
     <div class="track-grid">
         <div class="track-box {box_class}">
@@ -241,3 +238,5 @@ else:
         
         df_plot = item["df"].tail(40)
         fig = go.Figure(data=[go.Candlestick(
+            x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='K線'
+        )])
