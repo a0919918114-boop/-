@@ -14,7 +14,7 @@ st.set_page_config(
 
 # 2. 初始化自訂持倉的記憶資料庫
 if "my_positions" not in st.session_state:
-    st.session_state.my_positions = [] # 用來存放多筆持倉資料的清單
+    st.session_state.my_positions = [] 
 
 # 介面語系與排版優化 (Tailwind 風格 CSS)
 st.markdown("""
@@ -41,15 +41,21 @@ if st.sidebar.button("🔄 手動即時重新整理"):
 st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="sub-title">數據每 10 秒自動跳動更新 | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# 3. 定義要追蹤的期貨商品代號
+# 3. 【全新擴充：加回日指與韓指之十強大軍名單】
 FUTURE_MAP = {
     "台指期近月 (WTX=F)": "WTX=F",
-    "微型小道瓊近月 (MYM=F)": "MYM=F",
-    "黃金期貨近月 (GC=F)": "GC=F",
-    "輕原油期貨近月 (CL=F)": "CL=F"
+    "微型小道瓊 (MYM=F)": "MYM=F",
+    "微型那斯達克 (MNQ=F)": "MNQ=F",
+    "微型標普500 (MES=F)": "MES=F",
+    "日經225指數 (NK225)": "^N225",
+    "韓國綜合200 (KOSPI)": "^KS200",
+    "黃金期貨 (GC=F)": "GC=F",
+    "白銀期貨 (SI=F)": "SI=F",
+    "輕原油期貨 (CL=F)": "CL=F",
+    "天然氣期貨 (NG=F)": "NG=F"
 }
 
-@st.cache_data(ttl=10) # 10秒短快取，達成即時自動跳動追蹤
+@st.cache_data(ttl=10) # 10秒短快取
 def fetch_and_analyze(ticker_name, ticker_symbol):
     try:
         df = yf.download(ticker_symbol, period="6mo", interval="1d", progress=False)
@@ -95,7 +101,6 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
         if kd_death: score -= 3
         if macd_down and today['MACD_hist'] < 0: score -= 1
         
-        # 轉換成百分制分數
         score_100 = int(((score + 6) / 12) * 100)
         
         if score > 0:
@@ -119,6 +124,7 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
             "direction": direction,
             "color": color_code,
             "stop_loss": round(stop_loss_val, 2),
+            "lock_in_profit": round(float(df['Close'].iloc[-2]), 2), # 新增基準參考價防止報錯
             "kd_signal": "GOLDEN" if kd_golden else ("DEATH" if kd_death else "NONE"),
             "df": df
         }
@@ -143,10 +149,9 @@ user_price = st.sidebar.number_input("您的買進價格 (Entry)", value=float(c
 user_sl = st.sidebar.number_input("自訂固定止損點", value=float(sys_suggest_sl), step=1.0)
 user_tp = st.sidebar.number_input("自訂止盈目標價 (0代表不設)", value=0.0, step=1.0)
 
-# 【➕ 新增按鈕】
 if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True):
     new_pos = {
-        "id": str(time.time()), # 不重複ID
+        "id": str(time.time()), 
         "name": trade_name,
         "type": trade_type,
         "entry_price": user_price,
@@ -157,11 +162,9 @@ if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True
     st.sidebar.success(f"成功新增：{trade_name}")
     st.rerun()
 
-# ==================== 📊 輸出：持倉追蹤與智慧出場訊號區塊 ====================
+# ==================== 📊 輸出：持倉追蹤區塊 ====================
 if st.session_state.my_positions:
     st.markdown("### 🎛️ 我的即時監控持倉群組 (Active Portfolio)")
-    
-    # 垂直安全排版：每一筆單就是一個完整的大方格，絕不撞車
     for pos in list(st.session_state.my_positions):
         if pos["name"] not in all_data: continue
         
@@ -171,7 +174,6 @@ if st.session_state.my_positions:
         sl_p = pos["stop_loss"]
         tp_p = pos["take_profit"]
         
-        # 計算損益與出場條件
         if "做多" in pos["type"]:
             pnl = now_p - ent_p
             hit_sl = now_p <= sl_p
@@ -187,17 +189,10 @@ if st.session_state.my_positions:
         box_class = "profit" if pnl >= 0 else "loss"
         exit_status_text = "✅ 持倉狀態：健全持股中"
         
-        if hit_sl:
-            box_class = "alert"
-            exit_status_text = "🚨 出場訊號通知：價格已穿透您的自訂止損點！"
-        elif hit_tp:
-            box_class = "alert"
-            exit_status_text = "🎯 出場訊號通知：價格已達到您的預設止盈點！"
-        elif tech_exit:
-            box_class = "alert"
-            exit_status_text = "⚠️ 出場訊號通知：技術指標出現反轉交叉（KD指標反向交叉）！"
+        if hit_sl: box_class, exit_status_text = "alert", "🚨 出場訊號通知：價格已穿透您的自訂止損點！"
+        elif hit_tp: box_class, exit_status_text = "alert", "🎯 出場訊號通知：價格已達到您的預設止盈點！"
+        elif tech_exit: box_class, exit_status_text = "alert", "⚠️ 出場訊號通知：技術指標出現反轉交叉（KD指標反向交叉）！"
 
-        # 渲染高質感防撞追蹤大卡片
         st.markdown(f"""
         <div class="portfolio-card {box_class}">
             <div style="font-size: 1.3rem; font-weight: bold; color: #111827;">📈 持倉商品：{pos["name"]} （{pos["type"]}）</div>
@@ -216,15 +211,12 @@ if st.session_state.my_positions:
             </div>
         </div>
         """, unsafe_allow_html=True)
-        
-        # 【❌ 刪除平倉按鈕】獨立一整行，絕對好點擊
         if st.button(f"❌ 刪除 / 解除這筆「{pos['name']}」持倉監控", key=f"del_{pos['id']}", use_container_width=True):
             st.session_state.my_positions.remove(pos)
             st.rerun()
-            
     st.markdown("---")
 
-# 4. 原有每日技術分析榜單呈現
+# 4. 每日技術分析榜單呈現
 st.markdown("### 📊 今日全商品推薦觀察榜單")
 results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
 
