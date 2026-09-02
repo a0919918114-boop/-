@@ -4,11 +4,11 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 
-# 1. 網頁基礎設定 (RWD 響應式配置)
+# 1. 網頁基礎設定 (RWD 響應式配置，修正 layout 為 wide)
 st.set_page_config(
     page_title="期貨市場每日交易訊號自動更新網頁",
     page_icon="📈",
-    layout="vertical"
+    layout="wide"
 )
 
 # 介面語系與排版優化 (Tailwind 風格 CSS)
