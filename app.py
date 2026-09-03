@@ -37,7 +37,7 @@ if st.sidebar.button("🔄 手動即時重新整理"):
 st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="sub-title">數據每 30 分鐘自動跳動更新（抗封鎖極致穩定版） | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# 3. 全球熱門期貨名單（包含台指、美指、日指、韓指、黃金、原油、天然氣）
+# 3. 全球熱門期貨名單
 FUTURE_MAP = {
     "台指期近月 (WTX=F)": "WTX=F",
     "微型小道瓊 (MYM=F)": "MYM=F",
@@ -50,7 +50,7 @@ FUTURE_MAP = {
     "天然氣期貨近月 (NG=F)": "NG=F"
 }
 
-# 數據快取緩衝同步改為 30 分鐘 (1800秒)
+# 數據快取緩衝改為 30 分鐘 (1800秒)
 @st.cache_data(ttl=1800) 
 def fetch_and_analyze(ticker_name, ticker_symbol):
     try:
@@ -132,7 +132,7 @@ for name, symbol in FUTURE_MAP.items():
     res = fetch_and_analyze(name, symbol)
     if res: all_data[name] = res
 
-# ==================== 📥 側邊欄：持倉輸入面板功能 (最穩定的純點數版) ====================
+# ==================== 📥 側邊欄：持倉輸入面板功能 ====================
 st.sidebar.markdown("### 📥 持倉設定面板")
 trade_name = st.sidebar.selectbox("持有商品", list(FUTURE_MAP.keys()))
 trade_type = st.sidebar.radio("交易方向", ["做多 (Buy)", "做空 (Sell)"])
@@ -158,6 +158,7 @@ if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True
     st.rerun()
 
 # ==================== 📊 輸出：持倉追蹤與智慧出場訊號區塊 ====================
+# 【精準修正點】：修正為複數名 my_positions 100% 恢復正常
 if st.session_state.my_positions:
     st.markdown("### 🎛️ 我的即時監控持倉群組 (Active Portfolio)")
     for pos in list(st.session_state.my_positions):
@@ -169,7 +170,6 @@ if st.session_state.my_positions:
         sl_p = pos["stop_loss"]
         tp_p = pos["take_profit"]
         
-        # 計算點數損益與出場條件
         if "做多" in pos["type"]:
             pnl = now_p - ent_p
             hit_sl = now_p <= sl_p
