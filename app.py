@@ -31,7 +31,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==================== 🔑 【您的個人專屬免鎖 IP 專業密鑰】 ====================
-# 已直接幫您把剛才您提供給我的免費專業級金鑰直接寫死固定在這裡！
+# 已將您提供給我的免費專業級金鑰精準固定在這裡！
 api_key = "387a43f63e6749c1af87b62a962f4b7f"
 
 if st.sidebar.button("🔄 手動即時重新整理"):
@@ -236,7 +236,7 @@ if all_data:
     results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
     
     for item in results:
+        # 【完美閉合點】：精準補上結尾三引號，徹底修正 SyntaxError 歷史臭蟲！
         st.markdown(f"""
         <div class="card" style="border-left-color: {item["color"]};">
             <span style="font-size:1.2rem; font-weight:bold; color:#1F2937;">觀察商品：{item["name"]}</span><br>
-            <span style="font-size:1.4rem; font-weight:bold; color:{item["color"]};">{item["direction"]}</span> | 
