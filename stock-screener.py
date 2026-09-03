@@ -1,101 +1,103 @@
-import pandas as pd
 import streamlit as st
-import time
+import pandas as pd
+from FinMind.data import DataLoader
 
-# 1. 網頁基本配置
-st.set_page_config(page_title="全台股智能全自動掃描器", page_icon="📈", layout="wide")
-st.title("📊 全台股大數據全自動篩選器 (正式版)")
-st.write("【基本面 + 籌碼面複合策略】：一鍵掃描台股最新真實數據。")
+# 初始化 FinMind 資料載入器
+dl = DataLoader()
 
-# 📡 核心股票池配置
-@st.cache_data(ttl=86400)
-def load_real_taiwan_stocks():
-    # 採用高穩定性核心龍頭股票池進行精密篩選，確保數據交叉比對順暢
-    core_stocks = [
-        {"code": "2330", "name": "台積電", "industry": "半導體"},
-        {"code": "2317", "name": "鴻海", "industry": "其他電子"},
-        {"code": "2454", "name": "聯發科", "industry": "半導體"},
-        {"code": "2308", "name": "台達電", "industry": "電子零組件"},
-        {"code": "2382", "name": "廣達", "industry": "電腦週邊"},
-        {"code": "3008", "name": "大立光", "industry": "光電業"},
-        {"code": "2603", "name": "長榮", "industry": "航運業"},
-        {"code": "2303", "name": "聯電", "industry": "半導體"},
-        {"code": "2881", "name": "富邦金", "industry": "金融保險"},
-        {"code": "2882", "name": "國泰金", "industry": "金融保險"}
-    ]
-    return core_stocks
+def get_stock_data():
+    """獲取台股基本面與籌碼面數據並進行篩選"""
+    # 1. 取得全台股目前的最新列表
+    try:
+        stock_info = dl.taiwan_stock_info()
+        # 篩選出普通股（股票代號為4碼的）
+        stock_list = stock_info[stock_info['stock_id'].str.len() == 4]['stock_id'].unique().tolist()
+    except Exception as e:
+        st.error(f"無法取得股票列表: {e}")
+        return pd.DataFrame()
 
-# 🔎 核心篩選引擎
-def fetch_and_filter_market(progress_bar, status_text, min_weeks):
-    stocks = load_real_taiwan_stocks()
-    total_stocks = len(stocks)
-    qualified_list = []
+    results = []
     
-    for index, stock in enumerate(stocks):
-        code = stock["code"]
-        name = stock["name"]
-        
-        # 更新進度條
-        percent_complete = int((index + 1) / total_stocks * 100)
-        progress_bar.progress(percent_complete)
-        status_text.text(f"⏳ 正在比對指標中 {index+1}/{total_stocks}：{code} {name}...")
-        
-        # -------------------------------------------------------------------------
-        # 【條件矩陣優化】
-        # 依據台股最新基本面與籌碼趨勢進行權重動態配置：
-        # 1. 神秘金字塔：400張/1000張大戶持股比率高
-        # 2. 資本支出：大舉進行擴產與研發投資 (如半導體、AI伺服器供應鏈)
-        # 3. 現金流：營業現金流與自由現金流極為充沛之頂尖企業
-        # -------------------------------------------------------------------------
-        
-        # 精準動態過濾
-        if code in ["2330", "2317", "2454", "2382", "2603"]:
-            qualified_list.append({
-                "股票代碼": code,
-                "股票名稱": name,
-                "產業類別": stock["industry"],
-                "大股東續買狀態": f"連續 {min_weeks} 週以上增加 (🏛️)",
-                "資本支出狀態": "大舉擴產中 (🔥)",
-                "自由現金流 (FCF)": "充沛 (💰)"
-            })
-            
-        # 短暫延遲讓進度條視覺效果流暢
-        time.sleep(0.1)
-            
-    return pd.DataFrame(qualified_list)
-
-# --- 側邊欄控制面板 ---
-st.sidebar.header("⚙️ 終極選股條件設定")
-st.sidebar.markdown("---")
-min_weeks = st.sidebar.slider("🔥 大股東連續買進週數 (神秘金字塔門檻)", 1, 8, 3)
-st.sidebar.info("💡 說明：已針對台灣核心龍頭股優化基本面（資本支出、現金流）與籌碼面之交叉比對矩陣。")
-
-st.sidebar.markdown("---")
-start_scan = st.sidebar.button("🚀 一鍵全台股雷達掃描")
-
-# --- 主畫面邏輯處理 ---
-if start_scan:
-    st.subheader("🤖 全市場數據同步與矩陣篩選中")
+    # 為了加速示範，我們只掃描前 50 檔股票（您可以自行擴大或拔除限制）
+    # 注意：FinMind 免費版有每小時調用次數限制，實戰時建議分批或針對特定觀察清單篩選
+    scan_limit = min(50, len(stock_list))
     
     progress_bar = st.progress(0)
-    status_text = st.empty()
     
-    result_df = fetch_and_filter_market(progress_bar, status_text, min_weeks)
-    
-    status_text.empty()
-    progress_bar.empty()
-    
-    if not result_df.empty:
-        st.balloons()
-        st.success(f"🎉 掃描完畢！成功為您篩選出 {len(result_df)} 檔高資本支出、大戶續買、現金流充沛的潛力標的！")
-        st.dataframe(result_df, use_container_width=True)
+    for idx, stock_id in enumerate(stock_list[:scan_limit]):
+        progress_bar.progress((idx + 1) / scan_limit)
+        try:
+            # 🔍 條件 A & B：財報現金流量表 (資本支出大 & 現金流充足)
+            # 抓取最近 4 季的現金流量表
+            cf_data = dl.taiwan_stock_cash_flows(stock_id=stock_id, start_date='2024-01-01')
+            if cf_data.empty:
+                continue
+                
+            # 整理財報項目
+            cf_pivot = cf_data.pivot_table(index='date', columns='type', values='value').fillna(0)
+            
+            # 檢查是否有必備欄位
+            if '營業活動之現金流量' not in cf_pivot.columns or '取得不動產、廠房及設備' not in cf_pivot.columns:
+                continue
+                
+            latest_operating_cf = cf_pivot['營業活動之現金流量'].iloc[-1]
+            # 資本支出在財報通常紀錄為負值，取絕對值代表投入金額
+            latest_capex = abs(cf_pivot['取得不動產、廠房及設備'].iloc[-1]) 
+            
+            # 計算自由現金流 = 營業現金流 - 資本支出
+            free_cash_flow = latest_operating_cf - latest_capex
+            
+            # 篩選基本面：營業現金流 > 0 且 自由現金流 > 0 (代表手頭現金流充足)
+            if latest_operating_cf <= 0 or free_cash_flow <= 0:
+                continue
+
+            # 🔍 條件 C：籌碼面 (大股東持股持續買進)
+            # 抓取最近 4 週的集保戶股權分散表
+            holding_data = dl.taiwan_stock_holding_shares_per(stock_id=stock_id, start_date='2025-01-01')
+            if holding_data.empty:
+                continue
+                
+            # 篩選出 400張以上 或 1000張以上的大股東級距 (FinMind 中 400張以上通常是級距 11-15)
+            # 這裡以大於400張的持股比例加總做計算
+            big_holders = holding_data[holding_data['HoldingSharesLevel'] >= 11]
+            weekly_big_ratio = big_holders.groupby('date')['percent'].sum().sort_index()
+            
+            if len(weekly_big_ratio) < 3:
+                continue
+                
+            # 檢查最近三週大股東持股是否連續增加
+            latest_3_weeks = weekly_big_ratio.tail(3).values
+            is_big_holder_buying = (latest_3_weeks[2] > latest_3_weeks[1]) and (latest_3_weeks[1] > latest_3_weeks[0])
+            
+            if is_big_holder_buying:
+                # 取得股票名稱
+                name = stock_info[stock_info['stock_id'] == stock_id]['stock_name'].values[0]
+                results.append({
+                    "股票代號": stock_id,
+                    "股票名稱": name,
+                    "最新營業現金流(元)": f"{latest_operating_cf:,.0f}",
+                    "最新資本支出(元)": f"{latest_capex:,.0f}",
+                    "最新自由現金流(元)": f"{free_cash_flow:,.0f}",
+                    "最新大戶持股比例%": f"{latest_3_weeks[2]:.2f}%"
+                })
+        except Exception:
+            continue
+            
+    return pd.DataFrame(results)
+
+# --- Streamlit 網頁介面設計 ---
+st.set_page_config(page_title="台股複合選股小幫手", layout="wide")
+
+st.title("🏛️ 複合量化選股儀表板")
+st.markdown("### 篩選策略：資本支出大 🔥 & 大股東持續買進 📈 & 現金流充足 💰")
+st.caption("數據來源：FinMind 台灣股市大數據 API")
+
+if st.button("🚀 開始掃描並收集滿足條件個股", type="primary"):
+    with st.spinner("正在為您向證交所與集保所抓取最新數據，請稍候..."):
+        df_result = get_stock_data()
         
-        csv = result_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 下載本次選股名單 (CSV)",
-            data=csv,
-            file_name="taiwan_real_stocks.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning("⚠️ 掃描完成，目前市場上沒有股票同時滿足這三項嚴格條件。")
+        if not df_result.empty:
+            st.success(f"🎉 掃描完成！共找到 {len(df_result)} 檔符合條件的潛力個股：")
+            st.dataframe(df_result, use_container_width=True)
+        else:
+            st.warning("⚠️ 目前掃描範圍內，暫時沒有同時滿足這三項嚴格條件的股票，建議晚點再試或調整篩選範圍。")
