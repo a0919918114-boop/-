@@ -1,8 +1,8 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
+import requests
 import time
 
 # 1. 網頁基礎設定
@@ -12,7 +12,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# 【終極修復點】：在網頁一啟動時，強制初始化建立持倉資料庫，保證絕對不會再噴 AttributeError！
 if "my_positions" not in st.session_state:
     st.session_state["my_positions"] = []
 
@@ -22,50 +21,69 @@ st.markdown("""
     .big-title { font-size:2.2rem !important; font-weight: 700; color: #1E3A8A; text-align: center; margin-bottom: 0.5rem; }
     .sub-title { font-size:1.2rem !important; color: #4B5563; text-align: center; margin-bottom: 2rem; }
     .card { padding: 1.5rem; border-radius: 0.5rem; background-color: #F3F4F6; margin-bottom: 1rem; border-left: 5px solid #3B82F6; }
-    
-    /* 追蹤看盤看板專用防撞垂直卡片樣式 */
     .portfolio-card { padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-left: 10px solid #6B7280; background-color: #FFFFFF; margin-bottom: 1rem; }
     .portfolio-card.profit { border-left-color: #10B981; background-color: #F0FDF4; }
     .portfolio-card.loss { border-left-color: #EF4444; background-color: #FEF2F2; }
     .portfolio-card.alert { border-left-color: #F59E0B; background-color: #FFFBEB; animation: pulse 2s infinite; }
-    
     @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.01); } }
     </style>
     """, unsafe_allow_html=True)
 
-# 側邊欄基本手動刷新按鈕
+# ==================== 🔑 金鑰輸入欄位 ====================
+st.sidebar.markdown("### 🔑 專業金融數據設定")
+# 這裡讓您可以直接在網頁畫面上輸入剛才申請到的 API Key
+api_key = st.sidebar.text_input("請輸入您的 Twelve Data API Key", value="", type="password")
+
 if st.sidebar.button("🔄 手動即時重新整理"):
     st.cache_data.clear()
     st.rerun()
 
 st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="sub-title">數據每 30 分鐘自動跳動更新（抗封鎖極致穩定版） | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sub-title">數據每 30 分鐘自動跳動更新（Twelve Data 專業版引擎） | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# 3. 全球熱門期貨名單
+# Twelve Data 標準商品字典 (對應大盤現貨與全球關鍵期貨指數)
 FUTURE_MAP = {
-    "台指期近月 (WTX=F)": "WTX=F",
-    "微型小道瓊 (MYM=F)": "MYM=F",
-    "微型那斯達克 (MNQ=F)": "MNQ=F",
-    "微型標普500 (MES=F)": "MES=F",
-    "日經期貨近月 (NK=F)": "NK=F",
-    "黃金期貨近月 (GC=F)": "GC=F",
-    "白銀期貨近月 (SI=F)": "SI=F",
-    "輕原油期貨近月 (CL=F)": "CL=F",
-    "天然氣期貨近月 (NG=F)": "NG=F"
+    "台綜合股價指數 (TWII)": "TWII",
+    "道瓊工業指數 (DJI)": "DJI",
+    "那斯達克100指數 (NDX)": "NDX",
+    "標普500指數 (SPX)": "SPX",
+    "日經225指數 (N225)": "N225",
+    "現貨黃金美金 (XAU/USD)": "XAU/USD",
+    "現貨白銀美金 (XAG/USD)": "XAG/USD",
+    "布蘭特原油美金 (BRENT)": "BRENT",
+    "亨利港天然氣 (NG)": "NG"
 }
 
-# 數據快取緩衝改為 30 分鐘 (1800秒)
-@st.cache_data(ttl=1800) 
-def fetch_and_analyze(ticker_name, ticker_symbol):
+@st.cache_data(ttl=1800) # 30分鐘長快取
+def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
+    if not api_key:
+        return None
     try:
-        df = yf.download(ticker_symbol, period="6mo", interval="1d", progress=False)
-        if df.empty: return None
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        # 調用 Twelve Data 專業 K 線 API (抓取日K線，長度為6個月共130根)
+        url = f"https://twelvedata.com{ticker_symbol}&interval=1day&outputsize=130&apikey={api_key}"
+        response = requests.get(url).json()
+        
+        if "values" not in response:
+            return None
+            
+        # 轉換成 Pandas DataFrame 格式以利量化計算
+        data = response["values"]
+        df = pd.DataFrame(data)
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df = df.sort_values('datetime').reset_index(drop=True)
+        
+        for col in ['open', 'high', 'low', 'close']:
+            df[col] = pd.to_numeric(df[col])
+            
+        # 大寫改為原本邏輯的小寫
+        df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
+        df.set_index('datetime', inplace=True)
 
-        # 原生數學技術指標計算
+        # 原生技術指標計算 (KD, MACD)
         low_9 = df['Low'].rolling(window=9).min()
         high_9 = df['High'].rolling(window=9).max()
         rsv = ((df['Close'] - low_9) / (high_9 - low_9)) * 100
+        
         k_list, d_list = [], []
         current_k, current_d = 50.0, 50.0
         for r in rsv:
@@ -127,42 +145,46 @@ def fetch_and_analyze(ticker_name, ticker_symbol):
             "kd_signal": "GOLDEN" if kd_golden else ("DEATH" if kd_death else "NONE"),
             "df": df
         }
-    except Exception as e:
+    except:
         return None
 
-# 預先抓取行情
+# 執行分析
 all_data = {}
-for name, symbol in FUTURE_MAP.items():
-    res = fetch_and_analyze(name, symbol)
-    if res: all_data[name] = res
+if api_key:
+    for name, symbol in FUTURE_MAP.items():
+        res = fetch_and_analyze_pro(name, symbol, api_key)
+        if res: all_data[name] = res
+else:
+    st.warning("🔑 請先在左側側邊欄輸入您的 Twelve Data API Key，系統將立刻為您連線載入專業數據！")
 
-# ==================== 📥 側邊欄：持倉輸入面板功能 ====================
+# ==================== 📥 持倉輸入面板 ====================
 st.sidebar.markdown("### 📥 持倉設定面板")
-trade_name = st.sidebar.selectbox("持有商品", list(FUTURE_MAP.keys()))
-trade_type = st.sidebar.radio("交易方向", ["做多 (Buy)", "做空 (Sell)"])
+if all_data:
+    trade_name = st.sidebar.selectbox("持有商品", list(all_data.keys()))
+    trade_type = st.sidebar.radio("交易方向", ["做多 (Buy)", "做空 (Sell)"])
+    
+    current_market_price = all_data[trade_name]["price"]
+    sys_suggest_sl = all_data[trade_name]["stop_loss"]
+    
+    user_price = st.sidebar.number_input("您的買進價格 (Entry)", value=float(current_market_price), step=1.0)
+    user_sl = st.sidebar.number_input("自訂固定止損點", value=float(sys_suggest_sl), step=1.0)
+    user_tp = st.sidebar.number_input("自訂止盈目標價", value=0.0, step=1.0)
+    
+    if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True):
+        new_pos = {
+            "id": str(time.time()), 
+            "name": trade_name,
+            "type": trade_type,
+            "entry_price": user_price,
+            "stop_loss": user_sl,
+            "take_profit": user_tp
+        }
+        st.session_state.my_positions.append(new_pos)
+        st.sidebar.success(f"成功新增：{trade_name}")
+        st.rerun()
 
-current_market_price = all_data[trade_name]["price"] if trade_name in all_data else 0.0
-sys_suggest_sl = all_data[trade_name]["stop_loss"] if trade_name in all_data else 0.0
-
-user_price = st.sidebar.number_input("您的買進價格 (Entry)", value=float(current_market_price), step=1.0)
-user_sl = st.sidebar.number_input("自訂固定止損點", value=float(sys_suggest_sl), step=1.0)
-user_tp = st.sidebar.number_input("自訂止盈目標價 (0代表不設)", value=0.0, step=1.0)
-
-if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True):
-    new_pos = {
-        "id": str(time.time()), 
-        "name": trade_name,
-        "type": trade_type,
-        "entry_price": user_price,
-        "stop_loss": user_sl,
-        "take_profit": user_tp
-    }
-    st.session_state.my_positions.append(new_pos)
-    st.sidebar.success(f"成功新增：{trade_name}")
-    st.rerun()
-
-# ==================== 📊 輸出：持倉追蹤與智慧出場訊號區塊 ====================
-if st.session_state.my_positions:
+# ==================== 📊 輸出：持倉追蹤 ====================
+if st.session_state.my_positions and all_data:
     st.markdown("### 🎛️ 我的即時監控持倉群組 (Active Portfolio)")
     for pos in list(st.session_state.my_positions):
         if pos["name"] not in all_data: continue
@@ -190,11 +212,11 @@ if st.session_state.my_positions:
         
         if hit_sl: box_class, exit_status_text = "alert", "🚨 出場訊號通知：價格已穿透您的自訂止損點！"
         elif hit_tp: box_class, exit_status_text = "alert", "🎯 出場訊號通知：價格已達到您的預設止盈點！"
-        elif tech_exit: box_class, exit_status_text = "alert", "⚠️ 出場訊號通知：技術指標出現反轉交叉（KD指標反向交叉）！"
+        elif tech_exit: box_class, exit_status_text = "alert", "⚠️ 出場訊號通知：技術指標出現反轉交叉！"
 
         st.markdown(f"""
         <div class="portfolio-card {box_class}">
-            <div style="font-size: 1.3rem; font-weight: bold; color: #111827;">📈 持倉商品：{pos["name"]} （{pos["type"]}）</div>
+            <div style="font-size: 1.3rem; font-weight: bold; color: #111827;">📈 持倉商品：{pos["name"]}</div>
             <div style="margin-top: 0.5rem; font-size: 1rem; color: #374151;">
                 建倉成本：<b>{ent_p}</b> | 防守止損：<b>{sl_p}</b> {'| 止盈目標：<b>'+str(tp_p)+'</b>' if tp_p > 0 else ''}
             </div>
@@ -215,25 +237,9 @@ if st.session_state.my_positions:
             st.rerun()
     st.markdown("---")
 
-# 4. 原有每日技術分析榜單呈現
-st.markdown("### 📊 今日全商品推薦觀察榜單")
-results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
-
-if not results:
-    st.info("💡 暫時無法獲取數據，請稍後再試。")
-else:
+# 4. 每日技術分析榜單呈現
+if all_data:
+    st.markdown("### 📊 今日全商品推薦觀察榜單")
+    results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
+    
     for item in results:
-        st.markdown(f"""
-        <div class="card" style="border-left-color: {item["color"]};">
-            <span style="font-size:1.2rem; font-weight:bold; color:#1F2937;">觀察商品：{item["name"]}</span><br>
-            <span style="font-size:1.4rem; font-weight:bold; color:{item["color"]};">{item["direction"]}</span> | 
-            當前價格: <b>{item["price"]}</b> | 
-            系統建議止損參考: <b style="color:#DC2626;">{item["stop_loss"]}</b>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        df_plot = item["df"].tail(40)
-        fig = go.Figure(data=[go.Candlestick(
-            x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='K線'
-        )])
-        fig.update_layout(margin=dict(l=20, r=20, t=10, b=10), height=220, xaxis_rangeslider_visible=False, template="plotly_white")
