@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
 import time
 
@@ -12,6 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
+# 強制初始化持倉資料庫
 if "my_positions" not in st.session_state:
     st.session_state["my_positions"] = []
 
@@ -31,7 +32,6 @@ st.markdown("""
 
 # ==================== 🔑 金鑰輸入欄位 ====================
 st.sidebar.markdown("### 🔑 專業金融數據設定")
-# 這裡讓您可以直接在網頁畫面上輸入剛才申請到的 API Key
 api_key = st.sidebar.text_input("請輸入您的 Twelve Data API Key", value="", type="password")
 
 if st.sidebar.button("🔄 手動即時重新整理"):
@@ -41,7 +41,7 @@ if st.sidebar.button("🔄 手動即時重新整理"):
 st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="sub-title">數據每 30 分鐘自動跳動更新（Twelve Data 專業版引擎） | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# Twelve Data 標準商品字典 (對應大盤現貨與全球關鍵期貨指數)
+# Twelve Data 標準商品字典
 FUTURE_MAP = {
     "台綜合股價指數 (TWII)": "TWII",
     "道瓊工業指數 (DJI)": "DJI",
@@ -59,14 +59,12 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
     if not api_key:
         return None
     try:
-        # 調用 Twelve Data 專業 K 線 API (抓取日K線，長度為6個月共130根)
         url = f"https://twelvedata.com{ticker_symbol}&interval=1day&outputsize=130&apikey={api_key}"
         response = requests.get(url).json()
         
         if "values" not in response:
             return None
             
-        # 轉換成 Pandas DataFrame 格式以利量化計算
         data = response["values"]
         df = pd.DataFrame(data)
         df['datetime'] = pd.to_datetime(df['datetime'])
@@ -75,7 +73,6 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
         for col in ['open', 'high', 'low', 'close']:
             df[col] = pd.to_numeric(df[col])
             
-        # 大寫改為原本邏輯的小寫
         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close'})
         df.set_index('datetime', inplace=True)
 
@@ -148,12 +145,13 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
     except:
         return None
 
-# 執行分析
+# 執行資料抓取
 all_data = {}
 if api_key:
     for name, symbol in FUTURE_MAP.items():
         res = fetch_and_analyze_pro(name, symbol, api_key)
-        if res: all_data[name] = res
+        if res:
+            all_data[name] = res
 else:
     st.warning("🔑 請先在左側側邊欄輸入您的 Twelve Data API Key，系統將立刻為您連線載入專業數據！")
 
@@ -243,3 +241,5 @@ if all_data:
     results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
     
     for item in results:
+        st.markdown(f"""
+        <div class="card" style="border-left-color: {item["color"]};">
