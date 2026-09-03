@@ -16,30 +16,16 @@ st.set_page_config(
 if "my_positions" not in st.session_state:
     st.session_state["my_positions"] = []
 
-# 介面語系與排版優化 (Tailwind 風格 CSS)
-st.markdown("""
-    <style>
-    .big-title { font-size:2.2rem !important; font-weight: 700; color: #1E3A8A; text-align: center; margin-bottom: 0.5rem; }
-    .sub-title { font-size:1.2rem !important; color: #4B5563; text-align: center; margin-bottom: 2rem; }
-    .card { padding: 1.5rem; border-radius: 0.5rem; background-color: #F3F4F6; margin-bottom: 1rem; border-left: 5px solid #3B82F6; }
-    .portfolio-card { padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-left: 10px solid #6B7280; background-color: #FFFFFF; margin-bottom: 1rem; }
-    .portfolio-card.profit { border-left-color: #10B981; background-color: #F0FDF4; }
-    .portfolio-card.loss { border-left-color: #EF4444; background-color: #FEF2F2; }
-    .portfolio-card.alert { border-left-color: #F59E0B; background-color: #FFFBEB; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.01); } }
-    </style>
-    """, unsafe_allow_html=True)
-
 # ==================== 🔑 【您的個人專屬免鎖 IP 專業密鑰】 ====================
-# 已將您提供給我的免費專業級金鑰精準固定在這裡！
 api_key = "387a43f63e6749c1af87b62a962f4b7f"
 
 if st.sidebar.button("🔄 手動即時重新整理"):
     st.cache_data.clear()
     st.rerun()
 
-st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="sub-title">數據每 30 分鐘自動跳動更新（Twelve Data 專業版引擎） | 當前看盤時間：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>', unsafe_allow_html=True)
+st.title("🎯 期貨智慧量化下單與多持倉即時追蹤系統")
+st.write(f"數據每 30 分鐘自動跳動更新（Twelve Data 專業版引擎） | 當前看盤時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.markdown("---")
 
 # Twelve Data 標準全球熱門商品字典
 FUTURE_MAP = {
@@ -118,15 +104,12 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
         
         if score > 0:
             direction = f"偏多 (分數: {score_100}/100)"
-            color_code = "#10B981"
             stop_loss_val = float(df['Low'].iloc[-5:].min())
         elif score < 0:
             direction = f"偏空 (分數: {score_100}/100)"
-            color_code = "#EF4444"
             stop_loss_val = float(df['High'].iloc[-5:].max())
         else:
             direction = f"中性觀望 (分數: {score_100}/100)"
-            color_code = "#6B7280"
             stop_loss_val = float(df['Close'].iloc[-1])
             
         return {
@@ -135,7 +118,6 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
             "price": round(float(today['Close']), 2),
             "score_100": score_100,
             "direction": direction,
-            "color": color_code,
             "stop_loss": round(stop_loss_val, 2),
             "kd_signal": "GOLDEN" if kd_golden else ("DEATH" if kd_death else "NONE"),
             "df": df
@@ -178,7 +160,7 @@ if all_data:
 
 # ==================== 📊 輸出：持倉追蹤 ====================
 if st.session_state.my_positions and all_data:
-    st.markdown("### 🎛️ 我的即時監控持倉群組 (Active Portfolio)")
+    st.subheader("🎛️ 我的即時監控持倉群組 (Active Portfolio)")
     for pos in list(st.session_state.my_positions):
         if pos["name"] not in all_data: continue
         
@@ -200,43 +182,50 @@ if st.session_state.my_positions and all_data:
             tech_exit = target["kd_signal"] == "GOLDEN"
             
         pnl_sign = "+" if pnl >= 0 else ""
-        box_class = "profit" if pnl >= 0 else "loss"
         exit_status_text = "✅ 持倉狀態：健全持股中"
         
-        if hit_sl: box_class, exit_status_text = "alert", "🚨 出場訊號通知：價格已穿透您的自訂止損點！"
-        elif hit_tp: box_class, exit_status_text = "alert", "🎯 出場訊號通知：價格已達到您的預設止盈點！"
-        elif tech_exit: box_class, exit_status_text = "alert", "⚠️ 出場訊號通知：技術指標出現反轉交叉！"
+        if hit_sl: exit_status_text = "🚨 出場訊號通知：價格已穿透您的自訂止損點！"
+        elif hit_tp: exit_status_text = "🎯 出場訊號通知：價格已達到您的預設止盈點！"
+        elif tech_exit: exit_status_text = "⚠️ 出場訊號通知：技術指標出現反轉交叉！"
 
-        st.markdown(f"""
-        <div class="portfolio-card {box_class}">
-            <div style="font-size: 1.3rem; font-weight: bold; color: #111827;">📈 持倉商品：{pos["name"]}</div>
-            <div style="margin-top: 0.5rem; font-size: 1rem; color: #374151;">
-                建倉成本：<b>{ent_p}</b> | 防守止損：<b>{sl_p}</b> {'| 止盈目標：<b>'+str(tp_p)+'</b>' if tp_p > 0 else ''}
-            </div>
-            <div style="margin-top: 0.5rem; font-size: 1.2rem; color: #111827;">
-                當前市場報價：<span style="font-weight:bold;">{now_p}</span>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: bold; color: {'#10B981' if pnl >= 0 else '#EF4444'}; margin: 0.5rem 0;">
-                未實現損益點數：{pnl_sign}{round(pnl, 2)} 點
-            </div>
-            <hr style="border:0; border-top:1px solid #E5E7EB; margin: 0.5rem 0;">
-            <div style="font-size: 1.15rem; font-weight: bold; color: {'#111827' if box_class != 'alert' else '#DC2626'};">
-                {exit_status_text}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button(f"❌ 刪除 / 解除這筆「{pos['name']}」持倉監控", key=f"del_{pos['id']}", use_container_width=True):
+        # 用原生看板方格呈現
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label=f"📈 {pos['name']} ({pos['type']})", value=f"成本: {ent_p}")
+        with col2:
+            st.metric(label="當前市場報價", value=str(now_p), delta=f"{pnl_sign}{round(pnl, 2)} 點")
+        with col3:
+            st.metric(label="防守止損線", value=str(sl_p))
+            
+        if "🚨" in exit_status_text or "⚠️" in exit_status_text:
+            st.error(exit_status_text)
+        else:
+            st.success(exit_status_text)
+            
+        if st.button(f"❌ 刪除「{pos['name']}」監控", key=f"del_{pos['id']}", use_container_width=True):
             st.session_state.my_positions.remove(pos)
             st.rerun()
     st.markdown("---")
 
 # 4. 每日技術分析榜單呈現
 if all_data:
-    st.markdown("### 📊 今日全商品推薦觀察榜單")
+    st.subheader("📊 今日全商品推薦觀察榜單")
     results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
     
     for item in results:
-        # 【完美閉合點】：精準補上結尾三引號，徹底修正 SyntaxError 歷史臭蟲！
-        st.markdown(f"""
-        <div class="card" style="border-left-color: {item["color"]};">
-            <span style="font-size:1.2rem; font-weight:bold; color:#1F2937;">觀察商品：{item["name"]}</span><br>
+        # 用內建元件代替HTML三引號
+        st.info(f"📌 觀察商品：{item['name']} | 【{item['direction']}】 | 當前價格: {item['price']} | 系統建議止損: {item['stop_loss']}")
+        
+        df_plot = item["df"].tail(40)
+        fig = go.Figure(data=[go.Candlestick(
+            x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='K線'
+        )])
+        fig.update_layout(margin=dict(l=20, r=20, t=10, b=10), height=220, xaxis_rangeslider_visible=False, template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+st.caption(f"系統最後更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (每30分鐘自動跳動更新)")
+
+# 30分鐘刷新
+time.sleep(1800)
+st.rerun()
