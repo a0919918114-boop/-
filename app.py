@@ -12,6 +12,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# 【終極修復點】：在網頁一啟動時，強制初始化建立持倉資料庫，保證絕對不會再噴 AttributeError！
+if "my_positions" not in st.session_state:
+    st.session_state["my_positions"] = []
+
 # 介面語系與排版優化 (Tailwind 風格 CSS)
 st.markdown("""
     <style>
@@ -158,7 +162,6 @@ if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True
     st.rerun()
 
 # ==================== 📊 輸出：持倉追蹤與智慧出場訊號區塊 ====================
-# 【精準修正點】：修正為複數名 my_positions 100% 恢復正常
 if st.session_state.my_positions:
     st.markdown("### 🎛️ 我的即時監控持倉群組 (Active Portfolio)")
     for pos in list(st.session_state.my_positions):
@@ -234,5 +237,3 @@ else:
             x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name='K線'
         )])
         fig.update_layout(margin=dict(l=20, r=20, t=10, b=10), height=220, xaxis_rangeslider_visible=False, template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
-
