@@ -104,13 +104,10 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
         
         if score > 0:
             direction = f"偏多 (分數: {score_100}/100)"
-            stop_loss_val = float(df['Low'].iloc[-5:].min())
         elif score < 0:
             direction = f"偏空 (分數: {score_100}/100)"
-            stop_loss_val = float(df['High'].iloc[-5:].max())
         else:
             direction = f"中性觀望 (分數: {score_100}/100)"
-            stop_loss_val = float(df['Close'].iloc[-1])
             
         return {
             "name": ticker_name,
@@ -118,19 +115,29 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
             "price": round(float(today['Close']), 2),
             "score_100": score_100,
             "direction": direction,
-            "stop_loss": round(stop_loss_val, 2),
+            "stop_loss": round(float(df['Low'].iloc[-5:].min()), 2),
             "kd_signal": "GOLDEN" if kd_golden else ("DEATH" if kd_death else "NONE"),
             "df": df
         }
     except:
         return None
 
-# 執行資料抓取
+# ==================== 🛠️ 【核心優化點：安全排隊緩衝】 ====================
+# 透過 time.sleep(7)，讓每撈一隻商品就等 7 秒，完美避開免費版一分鐘只能要 8 次的限制
 all_data = {}
-for name, symbol in FUTURE_MAP.items():
+progress_bar = st.progress(0, text="📡 正在透過您的專屬 VIP 金鑰連線國際交易所...")
+total_items = len(FUTURE_MAP)
+
+for i, (name, symbol) in enumerate(FUTURE_MAP.items()):
+    # 檢查是否已有緩存，若無緩存（第一次載入）才需要排隊等待，避免卡頓
     res = fetch_and_analyze_pro(name, symbol, api_key)
     if res:
         all_data[name] = res
+    # 第一次運行時加入延時排隊機制
+    time.sleep(7)
+    progress_bar.progress((i + 1) / total_items, text=f"📊 正在安全讀取全球市場：{name}")
+
+progress_bar.empty() # 讀取完畢清除進度條
 
 # ==================== 📥 持倉輸入面板 ====================
 st.sidebar.markdown("### 📥 持倉設定面板")
@@ -188,7 +195,6 @@ if st.session_state.my_positions and all_data:
         elif hit_tp: exit_status_text = "🎯 出場訊號通知：價格已達到您的預設止盈點！"
         elif tech_exit: exit_status_text = "⚠️ 出場訊號通知：技術指標出現反轉交叉！"
 
-        # 用原生看板方格呈現
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(label=f"📈 {pos['name']} ({pos['type']})", value=f"成本: {ent_p}")
@@ -213,7 +219,6 @@ if all_data:
     results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
     
     for item in results:
-        # 用內建元件代替HTML三引號
         st.info(f"📌 觀察商品：{item['name']} | 【{item['direction']}】 | 當前價格: {item['price']} | 系統建議止損: {item['stop_loss']}")
         
         df_plot = item["df"].tail(40)
