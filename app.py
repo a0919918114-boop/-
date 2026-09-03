@@ -30,18 +30,18 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# ==================== 🔑 金鑰輸入欄位 ====================
-st.sidebar.markdown("### 🔑 專業金融數據設定")
-api_key = st.sidebar.text_input("請輸入您的 Twelve Data API Key", value="", type="password")
+# ==================== 🔑 【您的個人專屬免鎖 IP 專業密鑰】 ====================
+# 已直接幫您把剛才您提供給我的免費專業級金鑰直接寫死固定在這裡！
+api_key = "387a43f63e6749c1af87b62a962f4b7f"
 
 if st.sidebar.button("🔄 手動即時重新整理"):
     st.cache_data.clear()
     st.rerun()
 
 st.markdown('<div class="big-title">🎯 期貨智慧量化下單與多持倉即時追蹤系統</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="sub-title">數據每 30 分鐘自動跳動更新（Twelve Data 專業版引擎） | 當前看盤時間：{datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sub-title">數據每 30 分鐘自動跳動更新（Twelve Data 專業版引擎） | 當前看盤時間：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</div>', unsafe_allow_html=True)
 
-# Twelve Data 標準商品字典
+# Twelve Data 標準全球熱門商品字典
 FUTURE_MAP = {
     "台綜合股價指數 (TWII)": "TWII",
     "道瓊工業指數 (DJI)": "DJI",
@@ -56,8 +56,6 @@ FUTURE_MAP = {
 
 @st.cache_data(ttl=1800) # 30分鐘長快取
 def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
-    if not api_key:
-        return None
     try:
         url = f"https://twelvedata.com{ticker_symbol}&interval=1day&outputsize=130&apikey={api_key}"
         response = requests.get(url).json()
@@ -147,13 +145,10 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
 
 # 執行資料抓取
 all_data = {}
-if api_key:
-    for name, symbol in FUTURE_MAP.items():
-        res = fetch_and_analyze_pro(name, symbol, api_key)
-        if res:
-            all_data[name] = res
-else:
-    st.warning("🔑 請先在左側側邊欄輸入您的 Twelve Data API Key，系統將立刻為您連線載入專業數據！")
+for name, symbol in FUTURE_MAP.items():
+    res = fetch_and_analyze_pro(name, symbol, api_key)
+    if res:
+        all_data[name] = res
 
 # ==================== 📥 持倉輸入面板 ====================
 st.sidebar.markdown("### 📥 持倉設定面板")
@@ -166,7 +161,7 @@ if all_data:
     
     user_price = st.sidebar.number_input("您的買進價格 (Entry)", value=float(current_market_price), step=1.0)
     user_sl = st.sidebar.number_input("自訂固定止損點", value=float(sys_suggest_sl), step=1.0)
-    user_tp = st.sidebar.number_input("自訂止盈目標價", value=0.0, step=1.0)
+    user_tp = st.sidebar.number_input("自訂止盈目標價 (0代表不設)", value=0.0, step=1.0)
     
     if st.sidebar.button("➕ 新增至即時追蹤面板", use_container_width=True):
         new_pos = {
@@ -241,6 +236,7 @@ if all_data:
     results = sorted(list(all_data.values()), key=lambda x: x["score_100"], reverse=True)
     
     for item in results:
-        # 【終極精準修復點】：這裡的三引號已經百分之百補齊閉合，絕對不再報錯！
         st.markdown(f"""
         <div class="card" style="border-left-color: {item["color"]};">
+            <span style="font-size:1.2rem; font-weight:bold; color:#1F2937;">觀察商品：{item["name"]}</span><br>
+            <span style="font-size:1.4rem; font-weight:bold; color:{item["color"]};">{item["direction"]}</span> | 
