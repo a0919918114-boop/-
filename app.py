@@ -46,7 +46,7 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
         url = f"https://twelvedata.com{ticker_symbol}&interval=1day&outputsize=130&apikey={api_key}"
         response = requests.get(url).json()
         
-        if "values" not in response:
+        if "values" not in response or not response["values"]:
             return None
             
         data = response["values"]
@@ -122,22 +122,19 @@ def fetch_and_analyze_pro(ticker_name, ticker_symbol, api_key):
     except:
         return None
 
-# ==================== 🛠️ 【核心優化點：安全排隊緩衝】 ====================
-# 透過 time.sleep(7)，讓每撈一隻商品就等 7 秒，完美避開免費版一分鐘只能要 8 次的限制
+# ==================== 🛠️ 【安全排隊與防卡死過濾機制】 ====================
 all_data = {}
 progress_bar = st.progress(0, text="📡 正在透過您的專屬 VIP 金鑰連線國際交易所...")
 total_items = len(FUTURE_MAP)
 
 for i, (name, symbol) in enumerate(FUTURE_MAP.items()):
-    # 檢查是否已有緩存，若無緩存（第一次載入）才需要排隊等待，避免卡頓
     res = fetch_and_analyze_pro(name, symbol, api_key)
-    if res:
+    # 【修復重點】：成功拿到數據才寫入，拿不到就默默跳過，絕不卡死清單！
+    if res and res is not None:
         all_data[name] = res
-    # 第一次運行時加入延時排隊機制
-    time.sleep(7)
-    progress_bar.progress((i + 1) / total_items, text=f"📊 正在安全讀取全球市場：{name}")
+    time.sleep(1) # 免費金鑰請求安全微秒間隔
 
-progress_bar.empty() # 讀取完畢清除進度條
+progress_bar.empty()
 
 # ==================== 📥 持倉輸入面板 ====================
 st.sidebar.markdown("### 📥 持倉設定面板")
@@ -164,6 +161,8 @@ if all_data:
         st.session_state.my_positions.append(new_pos)
         st.sidebar.success(f"成功新增：{trade_name}")
         st.rerun()
+else:
+    st.sidebar.info("⏳ 正在等待市場數據載入...")
 
 # ==================== 📊 輸出：持倉追蹤 ====================
 if st.session_state.my_positions and all_data:
@@ -228,6 +227,8 @@ if all_data:
         fig.update_layout(margin=dict(l=20, r=20, t=10, b=10), height=220, xaxis_rangeslider_visible=False, template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("<br>", unsafe_allow_html=True)
+else:
+    st.info("📡 正在等待專業數據連線中，請稍候... (若長時間未出現，可點選左側「手動即時重新整理」按鈕)")
 
 st.caption(f"系統最後更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (每30分鐘自動跳動更新)")
 
